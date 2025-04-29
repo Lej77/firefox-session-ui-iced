@@ -1,0 +1,40 @@
+[package]
+name = "firefox-session-ui-iced"
+version = "0.1.0"
+edition = "2021"
+authors = ["Lej77 <31554212+Lej77@users.noreply.github.com>"]
+license = "MIT OR Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = [
+    "real_data",
+]
+
+# Disable this feature to see fake data for faster compile times:
+real_data = ["dep:firefox_session_data"]
+
+# Support more html to PDF converters (increases binary size):
+html_to_pdf_all = ["firefox_session_data?/html_to_pdf_all"]
+
+[dependencies]
+iced = { version = "0.13.1", features = ["tokio"] }
+iced_aw = { version = "0.12.0", default-features = false, features = [
+    "selection_list",
+] } # Additional Widgets
+dark-light = "2.0.0" # Detect if system is using dark theme
+rfd = "0.15.0" # File prompts
+either = "1.11.0" # Used in public API of firefox_session_data
+serde_json = "1.0.116" # Used to parse session data into the type exported by firefox_session_data
+firefox_session_data = { git = "http://github.com/Lej77/firefox_session_data.git", tag = "v0.1.0", optional = true, features = ["windows-gui"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = "1.37.0"
+
+[build-dependencies]
+winresource = "0.1.19" # Executable icon on Windows
+
+# Huge text inside multi-line text editor is slow:
+[profile.dev.package.iced]
+opt-level = 1

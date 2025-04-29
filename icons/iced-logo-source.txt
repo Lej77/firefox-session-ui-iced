@@ -1,0 +1,1 @@
+https://github.com/iced-rs/iced/blob/12f4b875cfb0eeb0bac5416921c6cec40edd420c/docs/logo.svg
