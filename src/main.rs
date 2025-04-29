@@ -12,6 +12,31 @@ mod host;
 mod wizard;
 
 pub fn main() -> iced::Result {
+    #[cfg(target_family = "wasm")]
+    {
+        // init debug tool for WebAssembly
+        wasm_logger::init(wasm_logger::Config::new(if cfg!(debug_assertions) {
+            // Might need to change the browser inspector to actually see these messages:
+            log::Level::Trace
+        } else {
+            log::Level::Info
+        }));
+        console_error_panic_hook::set_once();
+
+        // Show dialog if app panics (otherwise just logs to console and silently stops working):
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            // Log error to console:
+            previous(info);
+            // Then open an alert window so the user notices the issue:
+            if let Some(win) = web_sys::window() {
+                let _ = win.alert_with_message(&format!(
+                    "App panicked and will now stop working:\n{info}"
+                ));
+            }
+        }));
+    }
+
     iced::application(
         SessionDataUtility::title,
         SessionDataUtility::update,
@@ -187,9 +212,19 @@ impl SessionDataUtility {
             loaded_data: None,
             selected_tab_groups: host::GenerateOptions::default(),
             // TODO: more robust finding of downloads folder.
-            save_path: std::env::var("USERPROFILE")
-                .map(|home| home + r"\Downloads\firefox-links")
-                .unwrap_or_default(),
+            save_path: {
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    std::env::var("USERPROFILE")
+                        .map(|home| home + r"\Downloads\firefox-links")
+                        .unwrap_or_default()
+                }
+                #[cfg(target_family = "wasm")]
+                {
+                    String::new()
+                }
+            },
+
             output_options: Default::default(),
             #[cfg(debug_assertions)]
             tab_groups: host::AllTabGroups {
@@ -275,8 +310,16 @@ impl SessionDataUtility {
             }
             Message::BrowseInputPath => Task::perform(host::prompt_load_file(), |path| {
                 path.as_ref()
-                    .and_then(|v| v.to_str())
-                    .map(|v| v.to_string())
+                    .and_then(|v| {
+                        #[cfg(target_family = "wasm")]
+                        {
+                            Some(v.file_name())
+                        }
+                        #[cfg(not(target_family = "wasm"))]
+                        {
+                            v.path().to_str().map(|v| v.to_owned())
+                        }
+                    })
                     .map(Message::SetInputPath)
                     .unwrap_or(Message::Nothing)
             }),
@@ -388,7 +431,18 @@ impl SessionDataUtility {
                 Task::none()
             }
             Message::BrowseSavePath => Task::perform(host::prompt_save_file(), |path| {
-                path.map(Message::SetSavePath).unwrap_or(Message::Nothing)
+                path.and_then(|handle| {
+                    #[cfg(target_family = "wasm")]
+                    {
+                        Some(handle.file_name())
+                    }
+                    #[cfg(not(target_family = "wasm"))]
+                    {
+                        handle.path().to_str().map(|v| v.to_owned())
+                    }
+                })
+                .map(Message::SetSavePath)
+                .unwrap_or(Message::Nothing)
             }),
             Message::SetOverwrite(v) => {
                 self.output_options.overwrite = v;

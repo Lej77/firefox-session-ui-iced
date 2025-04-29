@@ -13,6 +13,25 @@ use firefox_session_data::session_store::FirefoxSessionStore;
 #[cfg(feature = "real_data")]
 pub use firefox_session_data::to_links::ttl_formats::FormatInfo;
 
+/// A version of [`tokio::task::spawn_blocking`] that works for the WebAssembly
+/// target where we don't have access to threads, in that case we simply block
+/// the runtime (i.e. the event loop).
+#[cfg(feature = "real_data")]
+pub async fn spawn_blocking<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    #[cfg(target_family = "wasm")]
+    {
+        f()
+    }
+    #[cfg(not(target_family = "wasm"))]
+    {
+        tokio::task::spawn_blocking(f).await.unwrap()
+    }
+}
+
 #[cfg(not(feature = "real_data"))]
 mod fake {
     use super::*;
@@ -94,7 +113,7 @@ mod fake {
 
         pub async fn save_links(
             &self,
-            mut save_path: PathBuf,
+            save_path: PathBuf,
             generate_options: GenerateOptions,
             output_options: OutputOptions,
         ) -> Result<(), String> {
@@ -155,7 +174,7 @@ impl FirefoxProfileInfo {
 
         #[cfg(not(feature = "real_data"))]
         let profiles: Vec<FirefoxProfileInfo> = vec![FirefoxProfileInfo {
-            path: "./firefox-profiles/02921.default-release",
+            path: "./firefox-profiles/02921.default-release".into(),
             modified_at: Err("Not available".to_string()),
         }];
 
@@ -163,7 +182,7 @@ impl FirefoxProfileInfo {
     }
 }
 
-pub async fn prompt_load_file() -> Option<PathBuf> {
+pub async fn prompt_load_file() -> Option<rfd::FileHandle> {
     let mut builder = ::rfd::AsyncFileDialog::new() //.set_parent(&**cx)
         .add_filter("Firefox session file", &["js", "baklz4", "jsonlz4"])
         .add_filter("All files", &["*"])
@@ -174,26 +193,16 @@ pub async fn prompt_load_file() -> Option<PathBuf> {
         builder = builder.set_directory(data.join("Mozilla\\Firefox\\Profiles"));
     }
 
-    let file_path = {
-        let handle = builder.pick_file().await?;
-        handle.path().to_owned()
-    };
-
-    Some(file_path)
+    Some(builder.pick_file().await?)
 }
 
-pub async fn prompt_save_file() -> Option<String> {
+pub async fn prompt_save_file() -> Option<rfd::FileHandle> {
     let builder = rfd::AsyncFileDialog::new()
         // .set_parent(&**cx)
         // .add_filter("All files", &["*"])
         .set_title("Save Links from Firefox Tabs");
 
-    let path = {
-        let handle = builder.save_file().await?;
-        handle.path().to_owned()
-    };
-    let path_str = path.to_string_lossy().into_owned();
-    Some(path_str)
+    Some(builder.save_file().await?)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,7 +311,7 @@ impl FileInfo {
 
         let path = self.file_path.clone();
 
-        let data = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let data = spawn_blocking(move || -> Result<_, String> {
             let file = File::open(&*path)
                 .map_err(|e| format!("failed to open file at {}: {e}", path.display()))?;
 
@@ -315,8 +324,7 @@ impl FileInfo {
 
             Ok(data)
         })
-        .await
-        .expect("panicked when reading session data")?;
+        .await?;
 
         let data = Arc::from(data);
         self.data = Some(if self.is_compressed_file_format() {
@@ -336,15 +344,14 @@ impl FileInfo {
             FileData::Compressed(data) => data.clone(),
             FileData::Uncompressed(_) | FileData::Parsed(_) => return Ok(()),
         };
-        let decompressed = tokio::task::spawn_blocking(move || {
+        let decompressed = spawn_blocking(move || {
             firefox_session_data::io_utils::decompress_lz4_data(Either::<_, Empty>::Left(
                 Vec::<u8>::from(&*data).into(),
             ))
             .map(|reader| -> Vec<u8> { reader.into() })
             .map_err(|e| format!("failed to decompress data: {e}"))
         })
-        .await
-        .unwrap()?;
+        .await?;
 
         self.data = Some(FileData::Uncompressed(Arc::from(decompressed)));
         Ok(())
@@ -359,12 +366,11 @@ impl FileInfo {
             FileData::Uncompressed(data) => data.clone(),
             FileData::Parsed(_) => return Ok(()),
         };
-        let session = tokio::task::spawn_blocking(move || {
+        let session = spawn_blocking(move || {
             serde_json::from_slice::<FirefoxSessionStore>(&data)
                 .map_err(|e| format!("failed to parse sessionstore JSON data: {e}"))
         })
-        .await
-        .map_err(|e| format!("deserialization of JSON sessionstore data panicked: {e}"))??;
+        .await?;
 
         self.data = Some(FileData::Parsed(Arc::new(session)));
         Ok(())
@@ -379,7 +385,7 @@ impl FileInfo {
             .cloned()
             .ok_or("must deserialize JSON sessionstore data before tab groups can be inspected")?;
 
-        Ok(tokio::task::spawn_blocking(move || AllTabGroups {
+        Ok(spawn_blocking(move || AllTabGroups {
             open: get_groups_from_session(&session, true, false, sort_groups)
                 .enumerate()
                 .map(|(ix, group)| TabGroup {
@@ -395,8 +401,7 @@ impl FileInfo {
                 })
                 .collect::<Vec<_>>(),
         })
-        .await
-        .unwrap())
+        .await)
     }
 
     /// Generate a text only representation of the sessionstore data.
@@ -418,7 +423,7 @@ impl FileInfo {
             .cloned()
             .ok_or("must deserialize JSON sessionstore data before converting tabs to links")?;
 
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             let mut output: Vec<u8> = Vec::new();
 
             let open_groups =
@@ -474,7 +479,6 @@ impl FileInfo {
             Ok(String::from_utf8_lossy(&output).into_owned())
         })
         .await
-        .unwrap()
     }
     pub async fn save_links(
         &self,
@@ -499,7 +503,7 @@ impl FileInfo {
             .cloned()
             .ok_or("must deserialize JSON sessionstore data before converting tabs to links")?;
 
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking(move || {
             let (format, as_pdf) = output_options.format.as_format().to_link_format();
             let file_ext = if as_pdf.is_some() {
                 "pdf"
@@ -591,6 +595,5 @@ impl FileInfo {
             Ok(())
         })
         .await
-        .unwrap()
     }
 }

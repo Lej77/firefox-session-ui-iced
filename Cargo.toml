@@ -7,9 +7,13 @@ license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+
 [features]
 default = [
     "real_data",
+    # Default iced rendering:
+    "iced_wgpu",
+    "iced_skia",
 ]
 
 # Disable this feature to see fake data for faster compile times:
@@ -18,8 +22,14 @@ real_data = ["dep:firefox_session_data"]
 # Support more html to PDF converters (increases binary size):
 html_to_pdf_all = ["firefox_session_data?/html_to_pdf_all"]
 
+# Iced rendering:
+iced_wgpu = ["iced/wgpu"]
+iced_skia = ["iced/tiny-skia"]
+iced_webgl = ["iced/webgl", "iced_wgpu"]
+iced_web_colors = ["iced/web-colors"]
+
 [dependencies]
-iced = { version = "0.13.1", features = ["tokio"] }
+iced = { version = "0.13.1", default-features = false, features = ["fira-sans", "auto-detect-theme", "tokio"] }
 iced_aw = { version = "0.12.0", default-features = false, features = [
     "selection_list",
 ] } # Additional Widgets
@@ -28,9 +38,26 @@ rfd = "0.15.0" # File prompts
 either = "1.11.0" # Used in public API of firefox_session_data
 serde_json = "1.0.116" # Used to parse session data into the type exported by firefox_session_data
 firefox_session_data = { git = "http://github.com/Lej77/firefox_session_data.git", tag = "v0.1.0", optional = true, features = ["windows-gui"] }
+log = "0.4.0"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = "1.37.0"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+# https://docs.rs/getrandom/latest/getrandom/#webassembly-support
+getrandom = { version = "0.3", features = ["wasm_js"] }
+# https://github.com/rustwasm/wasm-bindgen/issues/2215#issuecomment-796244209
+parking_lot = { version = "0.11.1", features = ["wasm-bindgen"]}
+
+web-sys = { version = "0.3", features = ["HtmlCollection", "HtmlSelectElement", "HtmlOptionElement", "Url", "Blob", "HtmlAnchorElement"] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+# WebAssembly Debug
+wasm-logger = "0.2.0"
+console_error_panic_hook = "0.1.7"
+
 
 [build-dependencies]
 winresource = "0.1.19" # Executable icon on Windows
