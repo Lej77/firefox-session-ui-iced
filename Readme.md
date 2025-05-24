@@ -8,6 +8,7 @@ Note that this program simply makes use of the code exposed by the CLI tool at <
 ## Usage
 
 - Build a release version locally using `cargo build --release` then run `target/release/firefox-session-ui-iced.exe`.
+  - Or download a precompiled executable from the [latest GitHub release](https://github.com/Lej77/firefox-session-ui-iced/releases).
 - When developing use: `cargo run`
 - Build as website using [trunk](https://trunkrs.dev/) (`trunk serve` or `trunk build --release`),
   - You can try the current web demo at: <https://lej77.github.io/firefox-session-ui-iced/> (Note that currently it doesn't work yet, but you can see the appearance).
