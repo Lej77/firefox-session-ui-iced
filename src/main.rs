@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use host::WebSendable;
 use iced::widget::{
     button, center, checkbox, column, container, horizontal_space, mouse_area, opaque, pane_grid,
     pick_list, row, scrollable, stack, text, text_editor, text_input, tooltip, vertical_slider,
@@ -107,7 +108,7 @@ enum Message {
     /// User interactions with the preview text editor.
     Preview(text_editor::Action),
     SetPreview(String),
-    SetInputPath(String),
+    SetInputPath(String, Option<WebSendable<rfd::FileHandle>>),
     BrowseInputPath,
     LoadInputData,
     UpdateLoadedData(host::FileInfo),
@@ -136,6 +137,7 @@ struct SessionDataUtility {
     /// Incorrect when there is word wrapping.
     preview_scroll: u32,
     input_path: String,
+    input_data: Option<WebSendable<rfd::FileHandle>>,
     loaded_data: Option<host::FileInfo>,
     selected_tab_groups: host::GenerateOptions,
     save_path: String,
@@ -209,6 +211,7 @@ impl SessionDataUtility {
             preview: text_editor::Content::new(),
             preview_scroll: 0,
             input_path: "".to_string(),
+            input_data: None,
             loaded_data: None,
             selected_tab_groups: host::GenerateOptions::default(),
             // TODO: more robust finding of downloads folder.
@@ -304,27 +307,28 @@ impl SessionDataUtility {
                 }
                 Task::none()
             }
-            Message::SetInputPath(v) => {
-                self.input_path = v;
+            Message::SetInputPath(p, data) => {
+                self.input_path = p;
+                self.input_data = data;
                 Task::none()
             }
             Message::BrowseInputPath => Task::perform(host::prompt_load_file(), |path| {
-                path.as_ref()
-                    .and_then(|v| {
-                        #[cfg(target_family = "wasm")]
-                        {
-                            Some(v.file_name())
-                        }
-                        #[cfg(not(target_family = "wasm"))]
-                        {
-                            v.path().to_str().map(|v| v.to_owned())
-                        }
-                    })
-                    .map(Message::SetInputPath)
-                    .unwrap_or(Message::Nothing)
+                path.map(|v| {
+                    #[cfg(target_family = "wasm")]
+                    {
+                        (v.file_name(), v)
+                    }
+                    #[cfg(not(target_family = "wasm"))]
+                    {
+                        (v.path().to_string_lossy().into_owned(), v)
+                    }
+                })
+                .map(|(name, handle)| Message::SetInputPath(name, Some(WebSendable(handle))))
+                .unwrap_or(Message::Nothing)
             }),
             Message::LoadInputData => {
                 let mut data = host::FileInfo::new(PathBuf::from(self.input_path.clone()));
+                data.file_handle = self.input_data.clone();
                 self.loaded_data = Some(data.clone());
                 self.selected_tab_groups.open_group_indexes = None;
                 self.selected_tab_groups.closed_group_indexes = Some(Vec::new());
@@ -524,7 +528,8 @@ impl SessionDataUtility {
         column![
             row![
                 text("Path to sessionstore file: "),
-                text_input("", self.input_path.as_str()).on_input(Message::SetInputPath),
+                text_input("", self.input_path.as_str())
+                    .on_input(|path| Message::SetInputPath(path, None)),
                 button("Wizard").on_press(Message::FirefoxProfileWizard(wizard::Message::Show)),
                 button("Browse").on_press(Message::BrowseInputPath),
             ]

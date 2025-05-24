@@ -3,15 +3,24 @@
     allow(dead_code, unused_variables, unused_imports)
 )]
 
-use std::{
-    borrow::Cow, env, fs::OpenOptions, io::Empty, path::PathBuf, sync::Arc, time::SystemTime,
-};
+use std::{borrow::Cow, env, io::Empty, path::PathBuf, sync::Arc, time::SystemTime};
 
 use either::Either;
 #[cfg(feature = "real_data")]
 use firefox_session_data::session_store::FirefoxSessionStore;
 #[cfg(feature = "real_data")]
 pub use firefox_session_data::to_links::ttl_formats::FormatInfo;
+
+/// Unconditionally sendable when targeting the web.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebSendable<T>(pub T);
+
+// Safety: only a single thread when targeting the web.
+//         https://doc.rust-lang.org/nightly/rustc/platform-support/wasm32-unknown-unknown.html#conditionally-compiling-code
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+unsafe impl<T> Send for WebSendable<T> {}
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+unsafe impl<T> Sync for WebSendable<T> {}
 
 /// A version of [`tokio::task::spawn_blocking`] that works for the WebAssembly
 /// target where we don't have access to threads, in that case we simply block
@@ -193,7 +202,7 @@ pub async fn prompt_load_file() -> Option<rfd::FileHandle> {
         builder = builder.set_directory(data.join("Mozilla\\Firefox\\Profiles"));
     }
 
-    Some(builder.pick_file().await?)
+    builder.pick_file().await
 }
 
 pub async fn prompt_save_file() -> Option<rfd::FileHandle> {
@@ -202,7 +211,7 @@ pub async fn prompt_save_file() -> Option<rfd::FileHandle> {
         // .add_filter("All files", &["*"])
         .set_title("Save Links from Firefox Tabs");
 
-    Some(builder.save_file().await?)
+    builder.save_file().await
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,12 +291,14 @@ impl FileData {
 #[derive(Debug, Clone)]
 pub struct FileInfo {
     pub file_path: Arc<PathBuf>,
+    pub file_handle: Option<WebSendable<rfd::FileHandle>>,
     pub data: Option<FileData>,
 }
 impl FileInfo {
     pub fn new(file_path: PathBuf) -> Self {
         Self {
             file_path: Arc::new(file_path),
+            file_handle: None,
             data: None,
         }
     }
@@ -301,30 +312,42 @@ impl FileInfo {
 #[cfg(feature = "real_data")]
 impl FileInfo {
     pub async fn load_data(&mut self) -> Result<(), String> {
-        use std::{
-            fs::File,
-            io::{BufReader, Read},
-        };
         if self.data.is_some() {
             return Ok(());
         }
 
-        let path = self.file_path.clone();
+        #[cfg(target_family = "wasm")]
+        let data = self
+            .file_handle
+            .as_ref()
+            .ok_or("no file handle for the specified path")?
+            .0
+            .read()
+            .await;
 
-        let data = spawn_blocking(move || -> Result<_, String> {
-            let file = File::open(&*path)
-                .map_err(|e| format!("failed to open file at {}: {e}", path.display()))?;
+        #[cfg(not(target_family = "wasm"))]
+        let data = {
+            use std::{
+                fs::File,
+                io::{BufReader, Read},
+            };
 
-            let mut buffer = BufReader::new(file);
-            let mut data = Vec::new();
+            let path = self.file_path.clone();
+            spawn_blocking(move || -> Result<_, String> {
+                let file = File::open(&*path)
+                    .map_err(|e| format!("failed to open file at {}: {e}", path.display()))?;
 
-            buffer
-                .read_to_end(&mut data)
-                .map_err(|e| format!("failed to read file data from {}: {e}", path.display()))?;
+                let mut buffer = BufReader::new(file);
+                let mut data = Vec::new();
 
-            Ok(data)
-        })
-        .await?;
+                buffer.read_to_end(&mut data).map_err(|e| {
+                    format!("failed to read file data from {}: {e}", path.display())
+                })?;
+
+                Ok(data)
+            })
+            .await?
+        };
 
         let data = Arc::from(data);
         self.data = Some(if self.is_compressed_file_format() {
@@ -505,6 +528,7 @@ impl FileInfo {
 
         spawn_blocking(move || {
             let (format, as_pdf) = output_options.format.as_format().to_link_format();
+
             let file_ext = if as_pdf.is_some() {
                 "pdf"
             } else {
@@ -516,29 +540,40 @@ impl FileInfo {
                     LinkFormat::Typst => "typ",
                 }
             };
-            if save_path.extension().is_none() {
-                save_path.set_extension(file_ext);
-            }
 
-            if let Some(folder) = save_path.parent() {
-                if output_options.create_folder {
-                    std::fs::create_dir_all(folder).map_err(|e| {
-                        format!("failed to create folder at \"{}\": {e}", folder.display())
-                    })?;
+            let mut file = {
+                #[cfg(target_family = "wasm")]
+                {
+                    Vec::new()
                 }
-            }
-            let mut file = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .create(true)
-                .create_new(!output_options.overwrite)
-                .open(&save_path)
-                .map_err(|e| {
-                    format!(
-                        "failed to create new file at \"{}\": {e}",
-                        save_path.display()
-                    )
-                })?;
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    if save_path.extension().is_none() {
+                        save_path.set_extension(file_ext);
+                    }
+
+                    if let Some(folder) = save_path.parent() {
+                        if output_options.create_folder {
+                            std::fs::create_dir_all(folder).map_err(|e| {
+                                format!("failed to create folder at \"{}\": {e}", folder.display())
+                            })?;
+                        }
+                    }
+
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .create(true)
+                        .create_new(!output_options.overwrite)
+                        .open(&save_path)
+                        .map_err(|e| {
+                            format!(
+                                "failed to create new file at \"{}\": {e}",
+                                save_path.display()
+                            )
+                        })?
+                }
+            };
 
             let open_groups =
                 get_groups_from_session(&session, true, false, generate_options.sort_groups)
@@ -578,8 +613,8 @@ impl FileInfo {
                         table_of_contents: generate_options.table_of_content,
                         indent_all_links: true,
                         custom_page_break: "".into(),
-                        // If there is any data from Sidebery then TST data
-                        // won't be used and so on:
+                        // First found data is used so if there is any data from
+                        // Sidebery then TST data won't be used at all:
                         tree_sources: (&[
                             TreeDataSource::Sidebery,
                             TreeDataSource::TstWebExtension,
@@ -592,8 +627,59 @@ impl FileInfo {
             )
             .map_err(|e| e.to_string())?;
 
+            #[cfg(target_family = "wasm")]
+            save_file_on_web_target(file.as_slice(), Some(&format!("firefox-links.{file_ext}")))?;
+
             Ok(())
         })
         .await
     }
+}
+
+/// Save some data to a file and download it via the user's browser.
+///
+/// # References
+///
+/// <https://stackoverflow.com/questions/54626186/how-to-download-file-with-javascript>
+/// <https://stackoverflow.com/questions/44147912/arraybuffer-to-blob-conversion>
+#[cfg(target_family = "wasm")]
+fn save_file_on_web_target(data: &[u8], file_name: Option<&str>) -> Result<(), String> {
+    use wasm_bindgen::JsCast;
+
+    let byte_array = js_sys::Uint8Array::new_with_length(
+        data.len()
+            .try_into()
+            .map_err(|e| format!("Output file size was larger than a 32 bit number {e}"))?,
+    );
+    byte_array.copy_from(data);
+    let array = js_sys::Array::of1(&byte_array);
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&array)
+        .ok()
+        .ok_or("Blob creation failed")?;
+
+    let a_tag: web_sys::HtmlAnchorElement = web_sys::window()
+        .ok_or("no global window")?
+        .document()
+        .ok_or("no \"window.document\"")?
+        .create_element("a")
+        .map_err(|_| "failed to create \"a\" tag")?
+        .unchecked_into();
+
+    if let Some(file_name) = file_name {
+        a_tag.set_download(file_name);
+    }
+
+    let url = web_sys::Url::create_object_url_with_blob(&blob)
+        .ok()
+        .ok_or("url creation failed")?;
+
+    a_tag.set_href(&url);
+
+    a_tag.click();
+
+    web_sys::Url::revoke_object_url(&url)
+        .ok()
+        .ok_or("url revoke failed")?;
+
+    Ok(())
 }
