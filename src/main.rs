@@ -530,9 +530,11 @@ impl SessionDataUtility {
                 text("Path to sessionstore file: "),
                 text_input("", self.input_path.as_str())
                     .on_input(|path| Message::SetInputPath(path, None)),
-                button("Wizard").on_press(Message::FirefoxProfileWizard(wizard::Message::Show)),
-                button("Browse").on_press(Message::BrowseInputPath),
             ]
+            .push_maybe(cfg!(not(target_family = "wasm")).then(|| {
+                button("Wizard").on_press(Message::FirefoxProfileWizard(wizard::Message::Show))
+            }))
+            .push(button("Browse").on_press(Message::BrowseInputPath))
             .spacing(5)
             .align_y(Alignment::Center),
             row![
@@ -586,26 +588,36 @@ impl SessionDataUtility {
                 .into(),
             ])
             .height(Length::Fill),
-            row![
-                text("File path to write links to: "),
-                text_input("", self.save_path.as_str()).on_input(Message::SetSavePath),
-                button("Browse").on_press(Message::BrowseSavePath)
-            ]
-            .spacing(5)
-            .align_y(Alignment::Center),
-            row![
-                checkbox(
-                    "Create folder if it doesn't exist",
-                    self.output_options.create_folder
-                )
-                .on_toggle(Message::SetCreateFolder),
-                checkbox(
-                    "Overwrite file if it already exists",
-                    self.output_options.overwrite
-                )
-                .on_toggle(Message::SetOverwrite),
-            ]
-            .spacing(10),
+        ]
+        .push_maybe(
+            cfg!(not(target_family = "wasm")).then_some(
+                row![
+                    text("File path to write links to: "),
+                    text_input("", self.save_path.as_str()).on_input(Message::SetSavePath),
+                    button("Browse").on_press(Message::BrowseSavePath)
+                ]
+                .spacing(5)
+                .align_y(Alignment::Center),
+            ),
+        )
+        .push_maybe(
+            cfg!(not(target_family = "wasm")).then_some(
+                row![
+                    checkbox(
+                        "Create folder if it doesn't exist",
+                        self.output_options.create_folder
+                    )
+                    .on_toggle(Message::SetCreateFolder),
+                    checkbox(
+                        "Overwrite file if it already exists",
+                        self.output_options.overwrite
+                    )
+                    .on_toggle(Message::SetOverwrite),
+                ]
+                .spacing(10),
+            ),
+        )
+        .push(
             row![
                 button("Copy links to clipboard").on_press(Message::CopyLinksToClipboard),
                 horizontal_space(),
@@ -626,12 +638,14 @@ impl SessionDataUtility {
                 button("Save links to file").on_press(Message::SaveLinksToFile),
             ]
             .spacing(5),
+        )
+        .push(
             row![
                 text("Status: "),
                 text_input("", self.status.as_str()).on_input(|_| Message::Nothing)
             ]
             .align_y(Alignment::Center),
-        ]
+        )
         .spacing(20)
         .padding(10)
         .align_x(Alignment::Start)

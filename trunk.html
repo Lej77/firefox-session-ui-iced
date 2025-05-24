@@ -11,12 +11,20 @@ https://jl710.github.io/iced-guide/wasm/wasm.html
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Firefox Session Data Utility (Iced)</title>
     <link data-trunk rel="copy-file" href="icons/favicon.ico" />
-    <link data-trunk rel="rust" data-wasm-opt="z" data-cargo-no-default-features="true" data-cargo-features="iced_webgl iced_web_colors real_data" />
     <base data-trunk-public-url />
 </head>
 
 <body style="margin: 0; padding: 0; width:100%; height:100svh">
     <div id="main"> </div>
+    <script>
+        // Disable WebGPU support since we fail when using it, better to fallback to WebGL
+        Object.defineProperty(navigator, 'gpu', {
+            get() {
+                return undefined;
+            },
+        });
+    </script>
+    <link data-trunk rel="rust" data-wasm-opt="z" data-cargo-no-default-features="true" data-cargo-features="iced_webgl iced_web_colors real_data" />
 </body>
 
 </html>

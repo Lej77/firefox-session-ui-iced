@@ -503,6 +503,7 @@ impl FileInfo {
         })
         .await
     }
+    #[cfg_attr(target_family = "wasm", expect(unused_mut, unused_variables))]
     pub async fn save_links(
         &self,
         mut save_path: PathBuf,
