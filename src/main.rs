@@ -490,7 +490,7 @@ impl SessionDataUtility {
         }
     }
 
-    fn view_sidebar(&self) -> Element<Message> {
+    fn view_sidebar(&self) -> Element<'_, Message> {
         container(scrollable(
             column(
                 self.tab_groups
@@ -524,7 +524,7 @@ impl SessionDataUtility {
         .into()
     }
 
-    fn view_main_content(&self) -> Element<Message> {
+    fn view_main_content(&self) -> Element<'_, Message> {
         column![
             row![
                 text("Path to sessionstore file: "),
@@ -653,7 +653,7 @@ impl SessionDataUtility {
         .into()
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let content = pane_grid(&self.split_divider, |_pane, state, _is_maximized| {
             pane_grid::Content::new(match state {
                 SidebarPane::Sidebar => self.view_sidebar(),
