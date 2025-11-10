@@ -1,6 +1,6 @@
 [package]
 name = "firefox-session-ui-iced"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Lej77 <31554212+Lej77@users.noreply.github.com>"]
 license = "MIT OR Apache-2.0"
