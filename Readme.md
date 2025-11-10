@@ -13,6 +13,35 @@ Note that this program simply makes use of the code exposed by the CLI tool at <
 - Build as website using [trunk](https://trunkrs.dev/) (`trunk serve` or `trunk build --release`),
   - You can try the current web demo at: <https://lej77.github.io/firefox-session-ui-iced/> (Note that currently it doesn't work yet, but you can see the appearance).
 
+### `cargo install`
+
+You can use `cargo install` to easily build from source without manually cloning the repo:
+
+```bash
+cargo install --git https://github.com/Lej77/firefox-session-ui-iced.git
+```
+
+You can use [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) to easily download the precompiled executables from a GitHub release:
+
+```bash
+cargo binstall --git https://github.com/Lej77/firefox-session-ui-iced.git firefox-session-ui-iced
+```
+
+After installing you can update the program using [nabijaczleweli/cargo-update: A cargo subcommand for checking and applying updates to installed executables](https://github.com/nabijaczleweli/cargo-update):
+
+```bash
+cargo install-update --git firefox-session-ui-iced
+
+# OR update all installed programs:
+cargo install-update --git --all
+```
+
+You can uninstall uisng:
+
+```bash
+ cargo uninstall firefox-session-ui-iced
+```
+
 ## License
 
 This project is released under either:
