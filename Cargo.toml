@@ -1,7 +1,7 @@
 [package]
 name = "firefox-session-ui-iced"
-version = "0.1.1"
-edition = "2021"
+version = "0.1.2"
+edition = "2024"
 authors = ["Lej77 <31554212+Lej77@users.noreply.github.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Lej77/firefox-session-ui-iced"
@@ -30,15 +30,16 @@ iced_webgl = ["iced/webgl", "iced_wgpu"]
 iced_web_colors = ["iced/web-colors"]
 
 [dependencies]
-iced = { version = "0.13.1", default-features = false, features = ["fira-sans", "auto-detect-theme", "tokio"] }
-iced_aw = { version = "0.12.0", default-features = false, features = [
+iced = { version = "0.14.0", default-features = false, features = ["fira-sans", "crisp", "thread-pool", "linux-theme-detection", "x11", "wayland", "tokio"] }
+iced_aw = { version = "0.14.0", default-features = false, features = [
     "selection_list",
 ] } # Additional Widgets
-dark-light = "2.0.0" # Detect if system is using dark theme
-rfd = "0.15.0" # File prompts
+dark-light = "3.0.0" # Detect if system is using dark theme
+rfd = "0.17.0" # File prompts
+raw-window-handle = "0.6" # Prevent user interaction while file prompt is open
 either = "1.11.0" # Used in public API of firefox_session_data
 serde_json = "1.0.116" # Used to parse session data into the type exported by firefox_session_data
-firefox_session_data = { git = "http://github.com/Lej77/firefox_session_data.git", tag = "v0.1.3", optional = true, features = ["windows-gui"] }
+firefox_session_data = { git = "http://github.com/Lej77/firefox_session_data.git", tag = "v0.1.6", optional = true, features = ["windows-gui"] }
 log = "0.4.0"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -46,9 +47,9 @@ tokio = "1.37.0"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 # https://docs.rs/getrandom/latest/getrandom/#webassembly-support
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 # https://github.com/rustwasm/wasm-bindgen/issues/2215#issuecomment-796244209
-parking_lot = { version = "0.11.1", features = ["wasm-bindgen"]}
+parking_lot = { version = "0.11.0", features = ["wasm-bindgen"]}
 
 web-sys = { version = "0.3", features = ["HtmlCollection", "HtmlSelectElement", "HtmlOptionElement", "Url", "Blob", "HtmlAnchorElement"] }
 js-sys = "0.3"

@@ -1,7 +1,7 @@
 //! A wizard modal window that helps the user select a Firefox profile.
 
-use iced::widget::{column, container, row, text};
 use iced::Element;
+use iced::widget::{column, container, row, text};
 use iced_aw::selection_list;
 use std::path::PathBuf;
 
@@ -51,9 +51,9 @@ impl State {
 
         let content = container(
             column![
-                text("Select Firefox Session Data").size(24),
+                text("Select Session Data").size(24),
                 row![column![
-                    text("Firefox Profiles:"),
+                    text("Browser Profiles:"),
                     selection_list::SelectionList::new_with(
                         self.profile_names.as_slice(),
                         {
@@ -84,6 +84,7 @@ impl State {
             .spacing(20),
         )
         .width(600)
+        .height(400)
         .padding(10)
         .style(iced::widget::container::bordered_box);
 

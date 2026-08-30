@@ -20,7 +20,8 @@
 "tools":
     # Default wasm-bindgen version to download.
     # This is the "wasm-bindgen-cli" crate: https://crates.io/crates/wasm-bindgen-cli
-    "wasm_bindgen": "0.2.105"
+    # Must match the version in the "Cargo.lock" file.
+    "wasm_bindgen": "0.2.127"
     # Default wasm-opt version to download.
     # Find latest at: https://github.com/WebAssembly/binaryen/releases
-    "wasm_opt": "version_124"
+    "wasm_opt": "version_132"

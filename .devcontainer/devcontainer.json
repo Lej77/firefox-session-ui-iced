@@ -1,0 +1,93 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/rust
+{
+	"name": "Rust DevContainer",
+
+	// Use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            "BASE_IMAGE": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
+            "USERNAME": "vscode"
+        }
+    },
+
+	// Use 'mounts' to make the cargo cache persistent in a Docker Volume.
+	"mounts": [
+        // Forward display server:
+        //"source=/tmp,target=/tmp,type=bind",
+        //"source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind",
+        //"source=${localEnv:XDG_RUNTIME_DIR},target=/run/user/1000,type=bind",
+        "source=${localEnv:XDG_RUNTIME_DIR}/${localEnv:WAYLAND_DISPLAY},target=/run/user/1000/${localEnv:WAYLAND_DISPLAY},type=bind",
+		// Keep app dark theme in sync with OS:
+		"source=${localEnv:XDG_RUNTIME_DIR}/bus,target=/run/user/1000/bus,type=bind",
+
+		// Persistent Cargo cache (crates, registry indices)
+		{
+			"source": "devcontainer-cargo-registry-${devcontainerId}",
+			"target": "/usr/local/cargo/registry",
+			"type": "volume"
+		},
+		{
+			"source": "devcontainer-cargo-git-${devcontainerId}",
+			"target": "/usr/local/cargo/git",
+			"type": "volume"
+		},
+		// Shared persistent target directory outside workspace
+        {
+            "source": "devcontainer-cargo-target-${devcontainerId}",
+            "target": "/var/tmp/cargo-target",
+            "type": "volume"
+        }
+	],
+
+	"containerEnv": {
+        // Forward display server from host to container
+        "DISPLAY": "${localEnv:DISPLAY}",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+        "GDK_BACKEND": "wayland,x11",
+        "XDG_DATA_DIRS": "/usr/local/share:/usr/share",
+        // Environment details for Wayland socket location
+        "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+        "XDG_RUNTIME_DIR": "/run/user/1000",
+
+        // Shared target folder
+        "CARGO_TARGET_DIR": "/var/tmp/cargo-target"
+    },
+
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+
+	// Use 'postCreateCommand' to run commands after the container is created.
+	// "postCreateCommand": "rustc --version",
+    "onCreateCommand": "sudo chown -R $(id -u):$(id -g) /var/tmp/cargo-target",
+
+	// Configure tool-specific properties.
+	"customizations": {
+        "vscode": {
+            "extensions": [
+				// Rust development:
+				"rust-lang.rust-analyzer",
+				"vadimcn.vscode-lldb",
+				// Dependencies in Cargo.toml:
+				"tamasfe.even-better-toml",
+				"fill-labs.dependi",
+				// General lints:
+				"shardulm94.trailing-spaces",
+				"davidanson.vscode-markdownlint",
+				"streetsidesoftware.code-spell-checker",
+				"ban.spellright",
+				// Utilities:
+				"dnut.rewrap-revived",
+				"mhutchie.git-graph"
+			]
+        }
+    },
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+	"remoteUser": "vscode"
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Firefox Session UI (Iced)
+Comment=Inspect information inside Firefox's session data
+Exec=firefox-session-ui-iced
+Icon=com.lej77.firefox-session-ui-iced
+Categories=Utility;
+Terminal=false

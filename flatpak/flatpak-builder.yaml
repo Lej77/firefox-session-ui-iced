@@ -1,0 +1,78 @@
+id: com.lej77.firefox-session-ui-iced
+
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+command: firefox-session-ui-iced
+finish-args:
+  - --socket=wayland # Permission needed to show the window
+  - --socket=fallback-x11 # Permission needed to show the window on legacy windowing systems
+  - --socket=x11 # Required for copy to clipboard button to work
+  - --device=dri # OpenGL, Recommended for GPU acceleration
+  - --share=ipc
+
+  # Native Firefox paths
+  - --filesystem=~/.mozilla:ro
+  - --filesystem=xdg-config/mozilla/firefox:ro
+
+  # Snap Firefox path
+  - --filesystem=~/snap/firefox/common/.mozilla/firefox:ro
+
+  # Flatpak Firefox path (Host ~/.var/app directory)
+  - --filesystem=~/.var/app/org.mozilla.firefox/.mozilla/firefox:ro
+
+  # Chrome, Chromium, and Brave live inside XDG_CONFIG_HOME
+  - --filesystem=xdg-config/google-chrome:ro
+  - --filesystem=xdg-config/chromium:ro
+  - --filesystem=xdg-config/BraveSoftware/Brave-Browser:ro
+
+  # Easy output (no save prompts) by allowing writes to download folder:
+  - --filesystem=xdg-download
+
+modules:
+  - name: firefox-session-ui-iced
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/firefox-session-ui-iced/cargo
+        CARGO_NET_OFFLINE: 'true'
+    sources:
+      # Use source from GitHub:
+      #- type: git
+      #  url: https://github.com/Lej77/firefox-session-ui-iced.git
+      #  tag: v0.1.0
+
+      # Use source from this machine:
+      - type: dir
+        path: ..
+        skip:
+        - .git
+        - target
+        - dist
+
+      # Sources to build project:
+      - cargo-sources-project.json
+    build-commands:
+      # Symlink/move cargo/config to config.toml to fix deprecation warning
+      - test -f cargo/config && mv cargo/config cargo/config.toml || true
+
+      # Build directly - Cargo will automatically use $CARGO_HOME/config
+      - cargo build --offline --release
+
+      # Collect info as suggested by: https://v2.tauri.app/distribute/flatpak/
+      # Install binary to /app/bin
+      - install -Dm755 "target/release/firefox-session-ui-iced" /app/bin/firefox-session-ui-iced
+
+      # Install desktop icons
+      - install -Dm644 icons/icon-designer.microsoft.com-image-creator/resized/32x32.png /app/share/icons/hicolor/32x32/apps/com.lej77.firefox-session-ui-iced.png
+      - install -Dm644 icons/icon-designer.microsoft.com-image-creator/resized/64x64.png /app/share/icons/hicolor/64x64/apps/com.lej77.firefox-session-ui-iced.png
+      - install -Dm644 icons/icon-designer.microsoft.com-image-creator/resized/128x128.png /app/share/icons/hicolor/128x128/apps/com.lej77.firefox-session-ui-iced.png
+      - install -Dm644 icons/icon-designer.microsoft.com-image-creator/resized/512x512.png /app/share/icons/hicolor/512x512/apps/com.lej77.firefox-session-ui-iced.png
+
+      # Install Desktop File and AppData Metainfo
+      - install -Dm644 flatpak/com.lej77.firefox-session-ui-iced.desktop /app/share/applications/com.lej77.firefox-session-ui-iced.desktop
+      - install -Dm644 flatpak/com.lej77.firefox-session-ui-iced.metainfo.xml /app/share/metainfo/com.lej77.firefox-session-ui-iced.metainfo.xml

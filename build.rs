@@ -1,4 +1,3 @@
-
 fn main() {
     // https://doc.rust-lang.org/cargo/reference/build-scripts.html#change-detection
     println!("cargo::rerun-if-changed=build.rs"); // <- enable fine grained change detection.

@@ -1,13 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use host::WebSendable;
+use iced::futures::StreamExt as _;
 use iced::widget::{
-    button, center, checkbox, column, container, horizontal_space, mouse_area, opaque, pane_grid,
-    pick_list, row, scrollable, stack, text, text_editor, text_input, tooltip, vertical_slider,
+    button, center, checkbox, column, container, mouse_area, opaque, pane_grid, pick_list, row,
+    scrollable, space::horizontal as horizontal_space, stack, text, text_editor, text_input,
+    tooltip,
 };
-use iced::{time, Alignment, Color, Element, Length, Subscription, Task, Theme};
+use iced::{Alignment, Color, Element, Length, Subscription, Task, Theme};
 
 mod host;
 mod wizard;
@@ -39,13 +42,14 @@ pub fn main() -> iced::Result {
     }
 
     iced::application(
-        SessionDataUtility::title,
+        SessionDataUtility::start,
         SessionDataUtility::update,
         SessionDataUtility::view,
     )
+    .title(SessionDataUtility::title)
     .theme(SessionDataUtility::theme)
     .subscription(SessionDataUtility::subscription)
-    .run_with(SessionDataUtility::start)
+    .run()
 }
 
 /// From <https://github.com/iced-rs/iced/blob/a687a837653a576cb0599f7bc8ecd9c6054213a9/examples/modal/src/main.rs>
@@ -82,17 +86,6 @@ where
     }
 }
 
-/// Slider style that doesn't highlight one side of the slider's cursor.
-fn no_highlight_slider_style<Theme: iced::widget::slider::Catalog>(
-    theme: &Theme,
-    status: iced::widget::slider::Status,
-) -> iced::widget::slider::Style {
-    let theme_class = Theme::default();
-    let mut style = Theme::style(theme, &theme_class, status);
-    style.rail.backgrounds.0 = style.rail.backgrounds.1;
-    style
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SidebarPane {
     Sidebar,
@@ -103,12 +96,13 @@ enum SidebarPane {
 enum Message {
     /// Triggered after we detect that the system theme changed.
     SetSystemThemeMode(Theme),
+    RememberWindowId(iced::window::Id),
     SetSplit(pane_grid::ResizeEvent),
     FirefoxProfileWizard(wizard::Message),
     /// User interactions with the preview text editor.
     Preview(text_editor::Action),
     SetPreview(String),
-    SetInputPath(String, Option<WebSendable<rfd::FileHandle>>),
+    SetInputPath(String, Option<WebSendable<Arc<rfd::FileHandle>>>),
     BrowseInputPath,
     LoadInputData,
     UpdateLoadedData(host::FileInfo),
@@ -132,12 +126,13 @@ enum Message {
 #[derive(Debug)]
 struct SessionDataUtility {
     theme: Theme,
+    window_id: Option<iced::window::Id>,
     preview: text_editor::Content,
     /// Guess of which line the `preview` is scrolled to (at the top of view).
     /// Incorrect when there is word wrapping.
     preview_scroll: u32,
     input_path: String,
-    input_data: Option<WebSendable<rfd::FileHandle>>,
+    input_data: Option<WebSendable<Arc<rfd::FileHandle>>>,
     loaded_data: Option<host::FileInfo>,
     selected_tab_groups: host::GenerateOptions,
     save_path: String,
@@ -195,7 +190,8 @@ impl SessionDataUtility {
 impl SessionDataUtility {
     fn new() -> Self {
         Self {
-            theme: system_theme_mode(),
+            theme: theme_from_os_theme(dark_light::detect()),
+            window_id: None,
             split_divider: {
                 let (mut panes, first_pane_id) = pane_grid::State::new(SidebarPane::Sidebar);
                 let (_, split) = panes
@@ -216,13 +212,17 @@ impl SessionDataUtility {
             selected_tab_groups: host::GenerateOptions::default(),
             // TODO: more robust finding of downloads folder.
             save_path: {
-                #[cfg(not(target_family = "wasm"))]
+                #[cfg(any(windows, target_os = "linux"))]
                 {
-                    std::env::var("USERPROFILE")
-                        .map(|home| home + r"\Downloads\firefox-links")
+                    std::env::home_dir()
+                        .and_then(|home| {
+                            home.join("Downloads/firefox-links")
+                                .to_str()
+                                .map(str::to_owned)
+                        })
                         .unwrap_or_default()
                 }
-                #[cfg(target_family = "wasm")]
+                #[cfg(not(any(windows, target_os = "linux")))]
                 {
                     String::new()
                 }
@@ -266,6 +266,10 @@ impl SessionDataUtility {
                 self.theme = theme;
                 Task::none()
             }
+            Message::RememberWindowId(id) => {
+                self.window_id = Some(id);
+                Task::none()
+            }
             Message::SetSplit(event) => {
                 self.split_divider.resize(event.split, event.ratio);
                 Task::none()
@@ -286,24 +290,9 @@ impl SessionDataUtility {
                 Task::none()
             }
             Message::Preview(action) => {
-                if let text_editor::Action::Scroll { lines } = &action {
-                    self.preview_scroll = self
-                        .preview_scroll
-                        .saturating_add_signed(*lines)
-                        .min(self.preview.line_count() as u32);
-                }
                 if cfg!(debug_assertions) || !action.is_edit() {
-                    let (prev_line, prev_col) = self.preview.cursor_position();
-
                     // Update the state of the multi-line text editor:
                     self.preview.perform(action);
-
-                    let (new_line, new_col) = self.preview.cursor_position();
-                    if prev_line != new_line || prev_col != new_col {
-                        // Also need to update tracked scroll when moving cursor outside
-                        // of the visible area.
-                        self.preview_scroll = new_line as u32;
-                    }
                 }
                 Task::none()
             }
@@ -312,19 +301,30 @@ impl SessionDataUtility {
                 self.input_data = data;
                 Task::none()
             }
-            Message::BrowseInputPath => Task::perform(host::prompt_load_file(), |path| {
-                path.map(|v| {
-                    #[cfg(target_family = "wasm")]
-                    {
-                        (v.file_name(), v)
-                    }
-                    #[cfg(not(target_family = "wasm"))]
-                    {
-                        (v.path().to_string_lossy().into_owned(), v)
-                    }
+            Message::BrowseInputPath => if let Some(id) = self.window_id {
+                iced::window::run(id, |handle| {
+                    host::WebSendable(host::prompt_load_file(Some(&host::NoDisplayHandle(handle))))
                 })
-                .map(|(name, handle)| Message::SetInputPath(name, Some(WebSendable(handle))))
-                .unwrap_or(Message::Nothing)
+            } else {
+                Task::done(host::WebSendable(host::prompt_load_file(None)))
+            }
+            .then(|dialog_future| {
+                Task::perform(dialog_future.0, |path| {
+                    path.map(|v| {
+                        #[cfg(target_family = "wasm")]
+                        {
+                            (v.file_name(), v)
+                        }
+                        #[cfg(not(target_family = "wasm"))]
+                        {
+                            (v.path().to_string_lossy().into_owned(), v)
+                        }
+                    })
+                    .map(|(name, handle)| {
+                        Message::SetInputPath(name, Some(WebSendable(Arc::new(handle))))
+                    })
+                    .unwrap_or(Message::Nothing)
+                })
             }),
             Message::LoadInputData => {
                 let mut data = host::FileInfo::new(PathBuf::from(self.input_path.clone()));
@@ -370,15 +370,17 @@ impl SessionDataUtility {
                             },
                         )
                     }
-                    Some(host::FileData::Parsed { .. }) => Task::perform(
-                        async move { data.get_groups_from_session(true).await },
-                        |result| match result {
-                            Ok(all_groups) => Message::ParsedTabGroups(all_groups),
-                            Err(e) => Message::SetStatus(format!(
-                                "Failed to list windows in session: {e}"
-                            )),
-                        },
-                    ),
+                    Some(host::FileData::Parsed { .. } | host::FileData::Chromium { .. }) => {
+                        Task::perform(
+                            async move { data.get_groups_from_session(true).await },
+                            |result| match result {
+                                Ok(all_groups) => Message::ParsedTabGroups(all_groups),
+                                Err(e) => Message::SetStatus(format!(
+                                    "Failed to list windows in session: {e}"
+                                )),
+                            },
+                        )
+                    }
                     None => unreachable!("Always have data when updating file info"),
                 }
             }
@@ -434,19 +436,28 @@ impl SessionDataUtility {
                 self.save_path = v;
                 Task::none()
             }
-            Message::BrowseSavePath => Task::perform(host::prompt_save_file(), |path| {
-                path.and_then(|handle| {
-                    #[cfg(target_family = "wasm")]
-                    {
-                        Some(handle.file_name())
-                    }
-                    #[cfg(not(target_family = "wasm"))]
-                    {
-                        handle.path().to_str().map(|v| v.to_owned())
-                    }
+            Message::BrowseSavePath => if let Some(id) = self.window_id {
+                iced::window::run(id, |handle| {
+                    host::WebSendable(host::prompt_save_file(Some(&host::NoDisplayHandle(handle))))
                 })
-                .map(Message::SetSavePath)
-                .unwrap_or(Message::Nothing)
+            } else {
+                Task::done(host::WebSendable(host::prompt_save_file(None)))
+            }
+            .then(|dialog_future| {
+                Task::perform(dialog_future.0, |path| {
+                    path.and_then(|handle| {
+                        #[cfg(target_family = "wasm")]
+                        {
+                            Some(handle.file_name())
+                        }
+                        #[cfg(not(target_family = "wasm"))]
+                        {
+                            handle.path().to_str().map(|v| v.to_owned())
+                        }
+                    })
+                    .map(Message::SetSavePath)
+                    .unwrap_or(Message::Nothing)
+                })
             }),
             Message::SetOverwrite(v) => {
                 self.output_options.overwrite = v;
@@ -531,7 +542,7 @@ impl SessionDataUtility {
                 text_input("", self.input_path.as_str())
                     .on_input(|path| Message::SetInputPath(path, None)),
             ]
-            .push_maybe(cfg!(not(target_family = "wasm")).then(|| {
+            .push(cfg!(not(target_family = "wasm")).then(|| {
                 button("Wizard").on_press(Message::FirefoxProfileWizard(wizard::Message::Show))
             }))
             .push(button("Browse").on_press(Message::BrowseInputPath))
@@ -553,43 +564,20 @@ impl SessionDataUtility {
             .align_y(Alignment::Center),
             column([
                 text("Tabs as links: ").into(),
-                #[cfg(debug_assertions)]
-                {
-                    text(format!(
-                        "Scroll: {}/{}",
-                        self.preview_scroll,
-                        self.preview.line_count()
-                    ))
-                    .into()
-                },
                 row![
-                    text_editor(&self.preview)
-                        .on_action(Message::Preview)
-                        .height(Length::Fill),
-                    {
-                        let max = self.preview.line_count() as u32;
-                        vertical_slider(
-                            0..=max,
-                            max.saturating_sub(self.preview_scroll),
-                            move |new| {
-                                let new = max.saturating_sub(new);
-                                Message::Preview(text_editor::Action::Scroll {
-                                    lines: i32::try_from(
-                                        i64::from(new) - i64::from(self.preview_scroll),
-                                    )
-                                    .expect("too large scroll distance when using slider"),
-                                })
-                            },
-                        )
-                    }
-                    .style(no_highlight_slider_style)
+                    iced::widget::scrollable(
+                        text_editor(&self.preview)
+                            .on_action(Message::Preview)
+                            .min_height(600.0)
+                    )
+                    .height(Length::Fill),
                 ]
                 .width(Length::Fill)
                 .into(),
             ])
             .height(Length::Fill),
         ]
-        .push_maybe(
+        .push(
             cfg!(not(target_family = "wasm")).then_some(
                 row![
                     text("File path to write links to: "),
@@ -600,19 +588,15 @@ impl SessionDataUtility {
                 .align_y(Alignment::Center),
             ),
         )
-        .push_maybe(
+        .push(
             cfg!(not(target_family = "wasm")).then_some(
                 row![
-                    checkbox(
-                        "Create folder if it doesn't exist",
-                        self.output_options.create_folder
-                    )
-                    .on_toggle(Message::SetCreateFolder),
-                    checkbox(
-                        "Overwrite file if it already exists",
-                        self.output_options.overwrite
-                    )
-                    .on_toggle(Message::SetOverwrite),
+                    checkbox(self.output_options.create_folder)
+                        .label("Create folder if it doesn't exist")
+                        .on_toggle(Message::SetCreateFolder),
+                    checkbox(self.output_options.overwrite)
+                        .label("Overwrite file if it already exists")
+                        .on_toggle(Message::SetOverwrite),
                 ]
                 .spacing(10),
             ),
@@ -633,7 +617,7 @@ impl SessionDataUtility {
                     container(text(self.output_options.format.to_string()))
                         .padding(8)
                         .style(iced::widget::container::bordered_box),
-                    tooltip::Position::Top
+                    tooltip::Position::Left
                 ),
                 button("Save links to file").on_press(Message::SaveLinksToFile),
             ]
@@ -676,16 +660,28 @@ impl SessionDataUtility {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        // "time" requires one of the following iced features to be enabled:
-        // tokio, async-std, or smol
-        time::every(time::Duration::from_secs(10))
-            .map(|_| Message::SetSystemThemeMode(system_theme_mode()))
+        #[cfg(not(target_family = "wasm"))]
+        type MessageStream = dyn iced::futures::Stream<Item = Message> + Unpin + Send;
+        #[cfg(target_family = "wasm")]
+        type MessageStream = dyn iced::futures::Stream<Item = Message> + Unpin;
+
+        Subscription::batch([
+            Subscription::run(|| -> Box<MessageStream> {
+                match dark_light::stream() {
+                    Ok(theme_steam) => Box::new(theme_steam.map(|os_theme| {
+                        Message::SetSystemThemeMode(theme_from_os_theme(Ok(os_theme)))
+                    })),
+                    Err(_) => Box::new(iced::futures::stream::empty()),
+                }
+            }),
+            iced::window::events().map(|(id, _event)| Message::RememberWindowId(id)),
+        ])
     }
 }
 
 /// For more info see: https://github.com/iced-rs/iced/issues/1022
-fn system_theme_mode() -> Theme {
-    match dark_light::detect() {
+fn theme_from_os_theme(os_theme: Result<dark_light::Mode, dark_light::Error>) -> Theme {
+    match os_theme {
         Ok(dark_light::Mode::Light) | Ok(dark_light::Mode::Unspecified) => Theme::Light,
         Ok(dark_light::Mode::Dark) => Theme::Dark,
         Err(_e) => {
